@@ -187,7 +187,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_update', default=1, type=int, help='number of rl to update each time')
     # training
     parser.add_argument('--max_episode_length', default=1e9, type=int, help='')
-    parser.add_argument('--output', default='../../save', type=str, help='')
+    parser.add_argument('--output', default='save', type=str, help='')
     parser.add_argument('--debug', dest='debug', action='store_true')
     parser.add_argument('--init_w', default=0.003, type=float, help='')
     parser.add_argument('--train_episode', default=600, type=int, help='train iters each timestep')

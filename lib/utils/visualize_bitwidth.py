@@ -1,9 +1,14 @@
 """Simple visualization for HAQ bitwidth strategies"""
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
+import os
 
 
 def visualize_strategy(strategy, save_path, linear_quantization=False):
     """Visualize bitwidth strategy as a simple bar chart"""
+    # Ensure directory exists
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
     if linear_quantization:
         # Linear: [[w_bit, a_bit], ...]
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
@@ -29,5 +34,6 @@ def visualize_strategy(strategy, save_path, linear_quantization=False):
         ax.set_ylabel('Bits')
 
     plt.tight_layout()
-    plt.savefig(save_path)
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
+    print(f'Saved bitwidth visualization to {save_path}')
