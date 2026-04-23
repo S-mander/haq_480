@@ -3,8 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.model_zoo import load_url as load_state_dict_from_url
 
+# QConv2d/QLinear are quantization-aware drop-in replacements used by qmobilenet_v3
+from lib.utils.quantize_utils import QConv2d, QLinear
 
-__all__ = ['MobileNetV3', 'mobilenet_v3']
+
+__all__ = ['MobileNetV3', 'mobilenet_v3', 'qmobilenet_v3']
 
 model_urls = {
     'mobilenet_v3': 'https://hanlab.mit.edu/files/haq/mobilenetv3small-f3be529c.pth',
@@ -78,14 +81,14 @@ def make_divisible(x, divisible_by=8):
 
 
 class MobileBottleneck(nn.Module):
-    def __init__(self, inp, oup, kernel, stride, exp, se=False, nl='RE'):
+    def __init__(self, inp, oup, kernel, stride, exp, se=False, nl='RE', conv_layer=nn.Conv2d):
         super(MobileBottleneck, self).__init__()
         assert stride in [1, 2]
         assert kernel in [3, 5]
         padding = (kernel - 1) // 2
         self.use_res_connect = stride == 1 and inp == oup
 
-        conv_layer = nn.Conv2d
+        # conv_layer is injected so qmobilenet_v3 can swap in QConv2d
         norm_layer = nn.BatchNorm2d
         if nl == 'RE':
             nlin_layer = nn.ReLU # or ReLU6
@@ -121,7 +124,8 @@ class MobileBottleneck(nn.Module):
 
 
 class MobileNetV3(nn.Module):
-    def __init__(self, n_class=1000, input_size=224, dropout=0.2, mode='small', width_mult=1.0):
+    def __init__(self, n_class=1000, input_size=224, dropout=0.2, mode='small', width_mult=1.0, conv_layer=nn.Conv2d):
+        # conv_layer: pass QConv2d here to build a quantization-aware variant
         super(MobileNetV3, self).__init__()
         input_channel = 16
         last_channel = 1280
@@ -174,22 +178,25 @@ class MobileNetV3(nn.Module):
         for k, exp, c, se, nl, s in mobile_setting:
             output_channel = make_divisible(c * width_mult)
             exp_channel = make_divisible(exp * width_mult)
-            self.features.append(MobileBottleneck(input_channel, output_channel, k, s, exp_channel, se, nl))
+            # pass conv_layer so each bottleneck uses the right conv type
+            self.features.append(MobileBottleneck(input_channel, output_channel, k, s, exp_channel, se, nl, conv_layer=conv_layer))
             input_channel = output_channel
 
         # building last several layers
         if mode == 'large':
             last_conv = make_divisible(960 * width_mult)
-            self.features.append(conv_1x1_bn(input_channel, last_conv, nlin_layer=Hswish))
+            self.features.append(conv_1x1_bn(input_channel, last_conv, conv_layer=conv_layer, nlin_layer=Hswish))
             self.features.append(nn.AdaptiveAvgPool2d(1))
-            self.features.append(nn.Conv2d(last_conv, last_channel, 1, 1, 0))
+            # final pointwise projection, use conv_layer to stay consistent
+            self.features.append(conv_layer(last_conv, last_channel, 1, 1, 0))
             self.features.append(Hswish(inplace=True))
         elif mode == 'small':
             last_conv = make_divisible(576 * width_mult)
-            self.features.append(conv_1x1_bn(input_channel, last_conv, nlin_layer=Hswish))
+            self.features.append(conv_1x1_bn(input_channel, last_conv, conv_layer=conv_layer, nlin_layer=Hswish))
             # self.features.append(SEModule(last_conv))  # refer to paper Table2, but I think this is a mistake
             self.features.append(nn.AdaptiveAvgPool2d(1))
-            self.features.append(nn.Conv2d(last_conv, last_channel, 1, 1, 0))
+            # final pointwise projection, use conv_layer to stay consistent
+            self.features.append(conv_layer(last_conv, last_channel, 1, 1, 0))
             self.features.append(Hswish(inplace=True))
         else:
             raise NotImplementedError
@@ -197,10 +204,11 @@ class MobileNetV3(nn.Module):
         # make it nn.Sequential
         self.features = nn.Sequential(*self.features)
 
-        # building classifier
+        # building classifier, use QLinear when conv_layer is QConv2d
+        linear_layer = QLinear if conv_layer == QConv2d else nn.Linear
         self.classifier = nn.Sequential(
             nn.Dropout(p=dropout),    # refer to paper section 6
-            nn.Linear(last_channel, n_class),
+            linear_layer(last_channel, n_class),
         )
 
         self._initialize_weights()
@@ -240,5 +248,21 @@ def mobilenet_v3(pretrained=False, progress=True, **kwargs):
         state_dict = load_state_dict_from_url(model_urls['mobilenet_v3'],
                                               progress=progress)
         model.load_state_dict(state_dict)
+    return model
+
+
+def qmobilenet_v3(pretrained=False, progress=True, **kwargs):
+    """MobileNetV3 with QConv2d/QLinear layers for HAQ linear quantization search.
+
+    Swap in QConv2d so the RL agent can assign per-layer bit-widths at runtime.
+    Pretrained weights are loaded from the standard mobilenet_v3 checkpoint;
+    strict=False is used because QConv2d/QLinear add extra buffers.
+    """
+    model = MobileNetV3(conv_layer=QConv2d, **kwargs)
+    if pretrained:
+        state_dict = load_state_dict_from_url(model_urls['mobilenet_v3'],
+                                              progress=progress)
+        # strict=False: QConv2d/QLinear have extra quantization buffers not in the checkpoint
+        model.load_state_dict(state_dict, strict=False)
     return model
 
