@@ -19,6 +19,7 @@ import models as customized_models
 
 from lib.utils.utils import Logger, AverageMeter, accuracy
 from lib.utils.data_utils import get_dataset
+from lib.utils.visualize_bitwidth import visualize_strategy
 from progress.bar import Bar
 from lib.utils.quantize_utils import quantize_model, kmeans_update_model, QConv2d, QLinear, calibrate
 
@@ -318,6 +319,7 @@ if __name__ == '__main__':
             raise NotImplementedError
 
         print(strategy)
+        visualize_strategy(strategy, os.path.join(args.checkpoint, 'bitwidth_strategy.png'), linear_quantization=True)
         quantize_layer_bit_dict = {n: b for n, b in zip(quantizable_idx, strategy)}
         for i, layer in enumerate(model.modules()):
             if i not in quantizable_idx:
@@ -342,6 +344,7 @@ if __name__ == '__main__':
             # you can put your own strategy here
             raise NotImplementedError
         print('strategy for ' + args.arch + ': ', strategy)
+        visualize_strategy(strategy, os.path.join(args.checkpoint, 'bitwidth_strategy.png'), linear_quantization=False)
 
         assert len(quantizable_idx) == len(strategy), \
             'You should provide the same number of bit setting as layer list for weight quantization!'

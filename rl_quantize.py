@@ -11,6 +11,7 @@ from copy import deepcopy
 from lib.env.quantize_env import QuantizeEnv
 from lib.env.linear_quantize_env import LinearQuantizeEnv
 from lib.rl.ddpg import DDPG
+from lib.utils.visualize_bitwidth import visualize_strategy
 from tensorboardX import SummaryWriter
 
 import torch
@@ -64,7 +65,7 @@ def train(num_episode, agent, env, output, linear_quantization=False, debug=Fals
         T.append([reward, deepcopy(observation), deepcopy(observation2), action, done])
 
         # [optional] save intermideate model
-        if episode % int(num_episode / 10) == 0:
+        if episode % max(1, int(num_episode / 10)) == 0:
             agent.save_model(output)
 
         # update
@@ -144,6 +145,11 @@ def train(num_episode, agent, env, output, linear_quantization=False, debug=Fals
 
             text_writer.write('best reward: {}\n'.format(best_reward))
             text_writer.write('best policy: {}\n'.format(best_policy))
+
+    # Save final visualization
+    if len(best_policy) > 0:
+        visualize_strategy(best_policy, os.path.join(output, 'bitwidth_strategy.png'), linear_quantization)
+
     text_writer.close()
     return best_policy, best_reward
 
@@ -181,7 +187,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_update', default=1, type=int, help='number of rl to update each time')
     # training
     parser.add_argument('--max_episode_length', default=1e9, type=int, help='')
-    parser.add_argument('--output', default='../../save', type=str, help='')
+    parser.add_argument('--output', default='save', type=str, help='')
     parser.add_argument('--debug', dest='debug', action='store_true')
     parser.add_argument('--init_w', default=0.003, type=float, help='')
     parser.add_argument('--train_episode', default=600, type=int, help='train iters each timestep')
@@ -226,9 +232,23 @@ if __name__ == "__main__":
         num_classes = 1000
     elif args.dataset == 'imagenet100':
         num_classes = 100
+    elif args.dataset == 'imagenet10':
+        num_classes = 10
     else:
         raise NotImplementedError
-    model = models.__dict__[args.arch](pretrained=True, num_classes=num_classes)
+
+    # Load pretrained model
+    if num_classes == 1000:
+        model = models.__dict__[args.arch](pretrained=True)
+    else:
+        # Load with default 1000 classes, then replace classifier
+        model = models.__dict__[args.arch](pretrained=True)
+        if args.arch == 'mobilenet_v2':
+            model.classifier[1] = torch.nn.Linear(model.classifier[1].in_features, num_classes)
+        elif args.arch.startswith('resnet'):
+            model.fc = torch.nn.Linear(model.fc.in_features, num_classes)
+        else:
+            print(f"Warning: May need to manually adjust classifier for {args.arch}")
     if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
         model.features = torch.nn.DataParallel(model.features)
         model.cuda()
