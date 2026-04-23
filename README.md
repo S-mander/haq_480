@@ -136,3 +136,20 @@ bash run/run_linear_quantize_eval.sh
 | mobilenetv2 (original)    |       1.0      |     72.05    |    90.49     |
 | mobilenetv2 (0.6x latency)|       0.6      |     71.23    |    90.00     |
 
+
+## Our Contributions
+We extended the HAQ repository with the following improvements:
+- Visualization of Bitwidth per Layer
+- Added a plotting utility that generates a graph showing bitwidth allocation across layers after training.
+- Improves interpretability of reinforcement learning output.
+MobileNetV3 Support:
+- Added support for the MobileNetV3 architecture.
+- Modified model loading, configuration handling, and quantization pipeline compatibility.
+- Added scripts to run MobileNetV3 experiments.
+
+## How to Run Our Changes
+# Example (MobileNetV2)
+python rl_quantize.py --arch mobilenet_v2 ...
+
+# Example (MobileNetV3)
+bash run/run_linear_quantize_search_mobilenetv3.sh
